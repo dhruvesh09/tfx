@@ -249,6 +249,24 @@ class _ExpressionResolver:
       raise ValueError(
           f"IndexOperator failed to access the given index {op.index}.") from e
 
+  @_register(placeholder_pb2.ArtifactPropertyOperator)
+  def _resolve_property_operator(
+      self, op: placeholder_pb2.ArtifactPropertyOperator) -> Any:
+    """Evaluates the artifact property operator."""
+    value = self.resolve(op.expression)
+    if value is None or not value:
+      raise NullDereferenceError(op.expression)
+    if not isinstance(value, artifact.Artifact):
+      raise ValueError("ArtifactPropertyOperator failed to access property "
+                       f"{op.key}. Expected Artifact type. Got {type(value)}.")
+    try:
+      if op.custom_property:
+        return value.get_custom_property(op.key)
+      return value.__getattr__(op.key)
+    except:
+      raise ValueError("ArtifactPropertyOperator failed to find property with "
+                       f"key {op.key}.")
+
   @_register(placeholder_pb2.Base64EncodeOperator)
   def _resolve_base64_encode_operator(
       self, op: placeholder_pb2.Base64EncodeOperator) -> str:

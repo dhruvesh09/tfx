@@ -91,6 +91,18 @@ input_dict {
               string_value: "[\\"train\\", \\"eval\\"]"
             }
           }
+          properties {
+            key: "version"
+            value {
+              int_value: 42
+            }
+          }
+          custom_properties {
+            key: "custom_key"
+            value {
+              string_value: "custom_value"
+            }
+          }
         }
         type {
           name: "Examples"
@@ -161,6 +173,8 @@ class PlaceholderUtilsTest(tf.test.TestCase):
     examples[0].uri = "/tmp"
     examples[0].split_names = artifact_utils.encode_split_names(
         ["train", "eval"])
+    examples[0].version = 42
+    examples[0].set_string_custom_property("custom_key", "custom_value")
     self._serving_spec = infra_validator_pb2.ServingSpec()
     self._serving_spec.tensorflow_serving.tags.extend(["latest", "1.15.0-gpu"])
     self._resolution_context = placeholder_utils.ResolutionContext(
@@ -204,6 +218,61 @@ class PlaceholderUtilsTest(tf.test.TestCase):
     self.assertEqual(
         placeholder_utils.resolve_placeholder_expression(
             pb, self._resolution_context), "/tmp/Split-train/1")
+
+  def testArtifactProperty(self):
+    placeholder_expression = """
+      operator {
+        artifact_property_op {
+          expression {
+            operator {
+              index_op{
+                expression {
+                  placeholder {
+                    type: INPUT_ARTIFACT
+                    key: "examples"
+                  }
+                }
+                index: 0
+              }
+            }
+          }
+          key: "version"
+        }
+      }
+    """
+    pb = text_format.Parse(placeholder_expression,
+                           placeholder_pb2.PlaceholderExpression())
+    self.assertEqual(
+        placeholder_utils.resolve_placeholder_expression(
+            pb, self._resolution_context), 42)
+
+  def testArtifactCustomProperty(self):
+    placeholder_expression = """
+      operator {
+        artifact_property_op {
+          expression {
+            operator {
+              index_op{
+                expression {
+                  placeholder {
+                    type: INPUT_ARTIFACT
+                    key: "examples"
+                  }
+                }
+                index: 0
+              }
+            }
+          }
+          key: "custom_key"
+          custom_property: True
+        }
+      }
+    """
+    pb = text_format.Parse(placeholder_expression,
+                           placeholder_pb2.PlaceholderExpression())
+    self.assertEqual(
+        placeholder_utils.resolve_placeholder_expression(
+            pb, self._resolution_context), "custom_value")
 
   def testArtifactUriNoneAccess(self):
     # Access a missing optional channel.

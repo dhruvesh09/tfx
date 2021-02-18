@@ -44,6 +44,7 @@ message PlaceholderExpressionOperator {
     ComparisonOperator compare_op = 7;
     UnaryLogicalOperator unary_logical_op = 8;
     BinaryLogicalOperator binary_logical_op = 9;
+    ArtifactPropertyOperator artifact_property_op = 10;
   }
 }
 
@@ -57,6 +58,20 @@ message ArtifactUriOperator {
   // Optional. If provided, this operator returns the URI for a specific split.
   // It's needed if one artifact, e.g., Examples Artifact, has multiple splits.
   string split = 2;
+}
+
+// ArtifactPropertyOperator gets the property from a artifact placeholder.
+// ArtifactPropertyOperator: Artifact -> String
+message ArtifactPropertyOperator {
+  // Required. It must evaluate to an INPUT_ARTIFACT or OUTPUT_ARTIFACT type
+  // placeholder.
+  PlaceholderExpression expression = 1;
+
+  // Required. The key of the Artifact property.
+  string key = 2;
+
+  // Optional. If the property key is associated with a custom property.
+  bool custom_property = 3;
 }
 
 // ArtifactValueOperator evaluates to the value of primitive-type artifacts
