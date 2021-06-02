@@ -2,6 +2,9 @@
 
 ## Major Features and Improvements
 
+*  Combined/moved taxi's runtime_parameter, kubeflow_local and kubleflow_gcp example
+   pipelines into one penguin_pipeline_kubeflow example
+
 ## Breaking Changes
 
 ### For Pipeline Authors
