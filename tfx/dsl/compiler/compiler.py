@@ -191,8 +191,8 @@ class Compiler:
       input_spec = node.inputs.inputs[key]
       channel = input_spec.channels.add()
 
-      # If the node input comes from another node's output, fill the context
-      # queries with the producer node's contexts.
+      # If the node input comes from another node"s output, fill the context
+      # queries with the producer node"s contexts.
       if value in compile_context.node_outputs:
         channel.producer_node_query.id = value.producer_component_id
 
@@ -205,7 +205,7 @@ class Compiler:
           context_query.type.CopyFrom(producer_context.type)
           context_query.name.CopyFrom(producer_context.name)
 
-      # If the node input does not come from another node's output, fill the
+      # If the node input does not come from another node"s output, fill the
       # context queries based on Channel info. We requires every channel to have
       # pipeline context and will fill it automatically.
       else:
@@ -383,7 +383,7 @@ class Compiler:
     # This input_channels dict will be updated in the middle as the resolver
     # nodes are reduced, and this updated input_channels should be used
     # afterwise instead of tfx_node.inputs.
-    input_channels = dict(tfx_node.inputs.get_all())  # Shallow copy.
+    input_channels = dict(tfx_node.inputs)  # Shallow copy.
     resolver_steps = []
     resolver_nodes = self._get_upstream_resolver_nodes(tfx_node)
     # Reduce each resolver node into resolver steps in reversed topological

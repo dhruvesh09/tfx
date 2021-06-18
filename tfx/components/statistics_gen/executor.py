@@ -136,7 +136,7 @@ class Executor(base_beam_executor.BaseBeamExecutor):
             data
             | 'GenerateStatistics[%s]' % split >>
             stats_api.GenerateStatistics(stats_options)
-            | 'WriteStatsOutput[%s]' % split >>
+            | 'WriteStatsOutputs[%s]' % split >>
             stats_api.WriteStatisticsToBinaryFile(output_path))
         logging.info('Statistics for split %s written to %s.', split,
                      output_uri)
