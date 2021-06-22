@@ -22,7 +22,6 @@ import copy
 import json
 import os
 import tempfile
-from absl.testing import parameterized
 
 import tensorflow as tf
 import tensorflow_transform as tft
@@ -525,14 +524,10 @@ class ExecutorTest(tft_unit.TransformTestCase):
     # Output materialization is enabled.
     self.assertMetricsCounterEqual(metrics, 'materialize', 1)
 
-  @parameterized.named_parameters([('no_1st_input_cache', False),
-                                   ('empty_1st_input_cache', True)])
-  def test_do_with_cache(self, provide_first_input_cache):
+  def test_do_with_cache(self):
     # First run that creates cache.
     self._exec_properties[
         standard_component_specs.MODULE_FILE_KEY] = self._module_file
-    if provide_first_input_cache:
-      self._input_dict[standard_component_specs.ANALYZER_CACHE_KEY] = []
     metrics = self._run_pipeline_get_metrics()
 
     # The test data has 9909 instances in the train dataset, and 5091 instances

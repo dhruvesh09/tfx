@@ -49,6 +49,9 @@ _pipeline_name = 'taxi_pipeline_with_parameters'
 _pipeline_root = os.path.join('gs://my-bucket', 'tfx_taxi_simple',
                               kfp.dsl.RUN_ID_PLACEHOLDER)
 
+# Path of module files.
+_module_files_root = os.path.join('gs://my-bucket', 'modules')
+
 # Pipeline arguments for Beam powered Components.
 _beam_pipeline_args = [
     '--direct_running_mode=multi_processing',
@@ -59,13 +62,16 @@ _beam_pipeline_args = [
 
 
 def _create_parameterized_pipeline(
-    pipeline_name: Text, pipeline_root: Text, enable_cache: bool,
+    pipeline_name: Text, pipeline_root: Text, transform_module_file: Text,
+    trainer_module_file: Text, enable_cache: bool,
     beam_pipeline_args: List[Text]) -> pipeline.Pipeline:
   """Creates a simple TFX pipeline with RuntimeParameter.
 
   Args:
     pipeline_name: The name of the pipeline.
     pipeline_root: The root of the pipeline output.
+    transform_module_file: The path to the module file for Transform.
+    trainer_module_file: The path to the module file for Trainer.
     enable_cache: Whether to enable cache in this pipeline.
     beam_pipeline_args: Pipeline arguments for Beam powered Components.
 
@@ -77,20 +83,6 @@ def _create_parameterized_pipeline(
   data_root = data_types.RuntimeParameter(
       name='data-root',
       default='gs://my-bucket/data',
-      ptype=Text,
-  )
-
-  # Path to the transform module file.
-  transform_module_file = data_types.RuntimeParameter(
-      name='transform-module',
-      default='gs://my-bucket/modules/transform_module.py',
-      ptype=Text,
-  )
-
-  # Path to the trainer module file.
-  trainer_module_file = data_types.RuntimeParameter(
-      name='trainer-module',
-      default='gs://my-bucket/modules/trainer_module.py',
       ptype=Text,
   )
 
@@ -195,6 +187,9 @@ if __name__ == '__main__':
   pipeline = _create_parameterized_pipeline(
       pipeline_name=_pipeline_name,
       pipeline_root=_pipeline_root,
+      transform_module_file=os.path.join(_module_files_root,
+                                         'transform_module.py'),
+      trainer_module_file=os.path.join(_module_files_root, 'trainer_module.py'),
       enable_cache=True,
       beam_pipeline_args=_beam_pipeline_args)
 

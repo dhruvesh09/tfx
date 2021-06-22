@@ -346,9 +346,6 @@ class ExecutionParameter(_ComponentParameter):
     _type_check_helper(value_with_default, self.type)
 
 
-COMPATIBLE_TYPES_KEY = '_compatible_types'
-
-
 class ChannelParameter(_ComponentParameter):
   """An channel parameter that forms part of a ComponentSpec.
 
@@ -385,8 +382,6 @@ class ChannelParameter(_ComponentParameter):
             other.type == self.type and other.optional == self.optional)
 
   def type_check(self, arg_name: str, value: Channel):
-    if ((not isinstance(value, Channel)) or
-        not (value.type is self.type or
-             value.type in getattr(self.type, COMPATIBLE_TYPES_KEY, ()))):
+    if not isinstance(value, Channel) or value.type != self.type:
       raise TypeError('Argument %s should be a Channel of type %r (got %s).' %
                       (arg_name, self.type, value))

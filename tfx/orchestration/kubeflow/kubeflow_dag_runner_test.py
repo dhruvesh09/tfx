@@ -132,8 +132,8 @@ class KubeflowDagRunnerTest(test_case_utils.TfxTest):
                   'template': 'bigqueryexamplegen',
                   'arguments': {
                       'parameters': [{
-                          'name': 'pipeline-root',
-                          'value': '{{inputs.parameters.pipeline-root}}'
+                          'name': 'pipeline_root',
+                          'value': '{{inputs.parameters.pipeline_root}}'
                       }, {
                           'name': 'table-name',
                           'value': '{{inputs.parameters.table-name}}'
@@ -144,8 +144,8 @@ class KubeflowDagRunnerTest(test_case_utils.TfxTest):
                   'template': 'statisticsgen',
                   'arguments': {
                       'parameters': [{
-                          'name': 'pipeline-root',
-                          'value': '{{inputs.parameters.pipeline-root}}'
+                          'name': 'pipeline_root',
+                          'value': '{{inputs.parameters.pipeline_root}}'
                       }]
                   },
                   'dependencies': ['bigqueryexamplegen'],

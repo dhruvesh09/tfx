@@ -147,8 +147,9 @@ def prepare_contexts(
   Returns:
     A list of metadata_store_pb2.Context messages.
   """
+
   return [
-      _register_context_if_not_exist(
+      _generate_context_proto(
           metadata_handler=metadata_handler, context_spec=context_spec)
       for context_spec in node_contexts.contexts
   ]

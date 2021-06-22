@@ -1,4 +1,3 @@
-# Lint as: python2, python3
 # Copyright 2019 Google LLC. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Main entrypoint for containers with Kubeflow TFX component executors."""
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
 
 import argparse
 import copy
@@ -386,17 +381,34 @@ def main():
   parser.add_argument('--serialized_component', type=str, required=True)
   parser.add_argument('--tfx_ir', type=str, required=True)
   parser.add_argument('--node_id', type=str, required=True)
+  parser.add_argument('--runtime_parameter', type=str, action='append')
+
   launcher._register_execution = _register_execution  # pylint: disable=protected-access
 
   args = parser.parse_args()
 
   tfx_ir = pipeline_pb2.Pipeline()
   json_format.Parse(args.tfx_ir, tfx_ir)
-  # Substitute the runtime parameter to be a concrete run_id
-  runtime_parameter_utils.substitute_runtime_parameter(
-      tfx_ir, {
-          constants.PIPELINE_RUN_ID_PARAMETER_NAME: os.environ['WORKFLOW_ID'],
-      })
+
+  parameter_bindings = {
+      # Substitute the runtime parameter to be a concrete run_id
+      constants.PIPELINE_RUN_ID_PARAMETER_NAME:
+          os.environ['WORKFLOW_ID'],
+  }
+  # ARGO will fill runtime parameter values in the parameters.
+  # Runtime paramter format: "{name}=(INT|DOUBLE|STRING):{value}"
+  for param in args.runtime_parameter:
+    name, value_and_type = param.split('=', 1)
+    value_type, value = value_and_type.split(':', 1)
+    if value_type == pipeline_pb2.RuntimeParameter.Type.Name(
+        pipeline_pb2.RuntimeParameter.INT):
+      value = int(value)
+    elif value_type == pipeline_pb2.RuntimeParameter.Type.Name(
+        pipeline_pb2.RuntimeParameter.DOUBLE):
+      value = float(value)
+    parameter_bindings[name] = value
+  runtime_parameter_utils.substitute_runtime_parameter(tfx_ir,
+                                                       parameter_bindings)
 
   deployment_config = runner_utils.extract_local_deployment_config(tfx_ir)
 

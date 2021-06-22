@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tests for tfx.orchestration.portable.launcher."""
-import contextlib
 import copy
 import os
 
@@ -38,7 +37,6 @@ from tfx.proto.orchestration import execution_result_pb2
 from tfx.proto.orchestration import pipeline_pb2
 from tfx.utils import test_case_utils
 
-from ml_metadata.proto import metadata_store_pb2
 from google.protobuf import text_format
 
 _PYTHON_CLASS_EXECUTABLE_SPEC = executable_spec_pb2.PythonClassExecutableSpec
@@ -230,17 +228,29 @@ class LauncherTest(test_case_utils.TfxTest):
         connection_config=connection_config)
 
     # Sets up pipelines
-    self._pipeline = pipeline_pb2.Pipeline()
+    pipeline = pipeline_pb2.Pipeline()
     self.load_proto_from_text(
         os.path.join(
             os.path.dirname(__file__), 'testdata',
-            'pipeline_for_launcher_test.pbtxt'), self._pipeline)
-    self._pipeline_info = self._pipeline.pipeline_info
-    self._pipeline_runtime_spec = self._pipeline.runtime_spec
+            'pipeline_for_launcher_test.pbtxt'), pipeline)
+    # Substitute the runtime parameter to be a concrete run_id
+    runtime_parameter_utils.substitute_runtime_parameter(
+        pipeline, {
+            constants.PIPELINE_RUN_ID_PARAMETER_NAME: 'test_run',
+        })
+    self._pipeline_info = pipeline.pipeline_info
+    self._pipeline_runtime_spec = pipeline.runtime_spec
     self._pipeline_runtime_spec.pipeline_root.field_value.string_value = (
         pipeline_root)
-    self._pipeline_run_id_counter = 0
-    self.reloadPipelineWithNewRunId()
+    self._pipeline_runtime_spec.pipeline_run_id.field_value.string_value = (
+        'test_run_0')
+
+    # Extracts components
+    self._example_gen = pipeline.nodes[0].pipeline_node
+    self._transform = pipeline.nodes[1].pipeline_node
+    self._trainer = pipeline.nodes[2].pipeline_node
+    self._importer = pipeline.nodes[3].pipeline_node
+    self._resolver = pipeline.nodes[4].pipeline_node
 
     # Fakes an ExecutorSpec for Trainer
     self._trainer_executor_spec = _PYTHON_CLASS_EXECUTABLE_SPEC()
@@ -252,34 +262,11 @@ class LauncherTest(test_case_utils.TfxTest):
     self._custom_driver_spec = _PYTHON_CLASS_EXECUTABLE_SPEC()
     self._custom_driver_spec.class_path = 'tfx.orchestration.portable.launcher_test._FakeExampleGenLikeDriver'
 
-  def reloadPipelineWithNewRunId(self):
-    self._pipeline_run_id_counter += 1
-    # Substitute the runtime parameter to be a new run_id.
-    pipeline = pipeline_pb2.Pipeline()
-    pipeline.CopyFrom(self._pipeline)
-    runtime_parameter_utils.substitute_runtime_parameter(
-        pipeline, {
-            constants.PIPELINE_RUN_ID_PARAMETER_NAME:
-                f'test_run_{self._pipeline_run_id_counter}',
-        })
-    self._pipeline_runtime_spec.pipeline_run_id.field_value.string_value = (
-        f'test_run_{self._pipeline_run_id_counter}')
-
-    # Extracts components
-    self._example_gen = pipeline.nodes[0].pipeline_node
-    self._transform = pipeline.nodes[1].pipeline_node
-    self._trainer = pipeline.nodes[2].pipeline_node
-    self._importer = pipeline.nodes[3].pipeline_node
-    self._resolver = pipeline.nodes[4].pipeline_node
-
   @staticmethod
   def fakeUpstreamOutputs(mlmd_connection: metadata.Metadata,
                           example_gen: pipeline_pb2.PipelineNode,
-                          transform: pipeline_pb2.PipelineNode,
-                          cached: bool = False):
-    publish_execution = (
-        execution_publish_utils.publish_cached_execution
-        if cached else execution_publish_utils.publish_succeeded_execution)
+                          transform: pipeline_pb2.PipelineNode):
+
     with mlmd_connection as m:
       if example_gen:
         # Publishes ExampleGen output.
@@ -289,11 +276,8 @@ class LauncherTest(test_case_utils.TfxTest):
         contexts = context_lib.prepare_contexts(m, example_gen.contexts)
         execution = execution_publish_utils.register_execution(
             m, example_gen.node_info.type, contexts)
-        publish_execution(
-            metadata_handler=m,
-            execution_id=execution.id,
-            contexts=contexts,
-            output_artifacts={
+        execution_publish_utils.publish_succeeded_execution(
+            m, execution.id, contexts, {
                 'output_examples': [output_example],
             })
 
@@ -305,11 +289,8 @@ class LauncherTest(test_case_utils.TfxTest):
         contexts = context_lib.prepare_contexts(m, transform.contexts)
         execution = execution_publish_utils.register_execution(
             m, transform.node_info.type, contexts)
-        publish_execution(
-            metadata_handler=m,
-            execution_id=execution.id,
-            contexts=contexts,
-            output_artifacts={
+        execution_publish_utils.publish_succeeded_execution(
+            m, execution.id, contexts, {
                 'transform_graph': [output_transform_graph],
             })
 
@@ -370,7 +351,6 @@ class LauncherTest(test_case_utils.TfxTest):
       self.assertCountEqual(existing_exeuctions, m.store.get_executions())
 
   def testLauncher_EmptyOptionalInputTriggersExecution(self):
-    self.reloadPipelineWithNewRunId()
     self._test_executor_operators = {
         _PYTHON_CLASS_EXECUTABLE_SPEC: _FakeEmptyExecutorOperator
     }
@@ -395,7 +375,7 @@ class LauncherTest(test_case_utils.TfxTest):
           custom_properties {
             key: "name"
             value {
-              string_value: ":test_run_%d:my_trainer:model:0"
+              string_value: ":test_run_0:my_trainer:model:0"
             }
           }
           custom_properties {
@@ -404,7 +384,7 @@ class LauncherTest(test_case_utils.TfxTest):
               string_value: "0.123.4.dev"
             }
           }
-          state: LIVE""" % self._pipeline_run_id_counter,
+          state: LIVE""",
           artifact,
           ignored_fields=[
               'type_id', 'uri', 'create_time_since_epoch',
@@ -428,16 +408,16 @@ class LauncherTest(test_case_utils.TfxTest):
     # a new output.
     # In the second one, because the enable_cache is true and inputs don't
     # change. The launcher will published a CACHED execution.
-    self.reloadPipelineWithNewRunId()
     LauncherTest.fakeUpstreamOutputs(self._mlmd_connection, self._example_gen,
                                      self._transform)
-    execution_info = launcher.Launcher(
+    test_launcher = launcher.Launcher(
         pipeline_node=self._trainer,
         mlmd_connection=self._mlmd_connection,
         pipeline_info=self._pipeline_info,
         pipeline_runtime_spec=self._pipeline_runtime_spec,
         executor_spec=self._trainer_executor_spec,
-        custom_executor_operators=self._test_executor_operators).launch()
+        custom_executor_operators=self._test_executor_operators)
+    execution_info = test_launcher.launch()
 
     with self._mlmd_connection as m:
       [artifact] = m.store.get_artifacts_by_type('Model')
@@ -447,7 +427,7 @@ class LauncherTest(test_case_utils.TfxTest):
           custom_properties {
             key: "name"
             value {
-              string_value: ":test_run_%d:my_trainer:model:0"
+              string_value: ":test_run_0:my_trainer:model:0"
             }
           }
           custom_properties {
@@ -456,7 +436,7 @@ class LauncherTest(test_case_utils.TfxTest):
               string_value: "0.123.4.dev"
             }
           }
-          state: LIVE""" % self._pipeline_run_id_counter,
+          state: LIVE""",
           artifact,
           ignored_fields=[
               'type_id', 'uri', 'create_time_since_epoch',
@@ -474,15 +454,7 @@ class LauncherTest(test_case_utils.TfxTest):
               'last_update_time_since_epoch'
           ])
 
-    self.reloadPipelineWithNewRunId()
-    execution_info = launcher.Launcher(
-        pipeline_node=self._trainer,
-        mlmd_connection=self._mlmd_connection,
-        pipeline_info=self._pipeline_info,
-        pipeline_runtime_spec=self._pipeline_runtime_spec,
-        executor_spec=self._trainer_executor_spec,
-        custom_executor_operators=self._test_executor_operators).launch()
-
+    execution_info = test_launcher.launch()
     with self._mlmd_connection as m:
       [execution] = m.store.get_executions_by_id([execution_info.execution_id])
       self.assertProtoPartiallyEquals(
@@ -499,17 +471,17 @@ class LauncherTest(test_case_utils.TfxTest):
   def testLauncher_CacheIsSupportedForNodeWithNoOutput(self):
     # Even though a node has no output at all, the launcher should treat the
     # second execution as CACHED as long as the cache context is the same.
-    self.reloadPipelineWithNewRunId()
     LauncherTest.fakeUpstreamOutputs(self._mlmd_connection, self._example_gen,
                                      self._transform)
     self._trainer.ClearField('outputs')
-    execution_info = launcher.Launcher(
+    test_launcher = launcher.Launcher(
         pipeline_node=self._trainer,
         mlmd_connection=self._mlmd_connection,
         pipeline_info=self._pipeline_info,
         pipeline_runtime_spec=self._pipeline_runtime_spec,
         executor_spec=self._trainer_executor_spec,
-        custom_executor_operators=self._test_executor_operators).launch()
+        custom_executor_operators=self._test_executor_operators)
+    execution_info = test_launcher.launch()
 
     with self._mlmd_connection as m:
       [execution] = m.store.get_executions_by_id([execution_info.execution_id])
@@ -524,16 +496,7 @@ class LauncherTest(test_case_utils.TfxTest):
               'last_update_time_since_epoch'
           ])
 
-    self.reloadPipelineWithNewRunId()
-    self._trainer.ClearField('outputs')
-    execution_info = launcher.Launcher(
-        pipeline_node=self._trainer,
-        mlmd_connection=self._mlmd_connection,
-        pipeline_info=self._pipeline_info,
-        pipeline_runtime_spec=self._pipeline_runtime_spec,
-        executor_spec=self._trainer_executor_spec,
-        custom_executor_operators=self._test_executor_operators).launch()
-
+    execution_info = test_launcher.launch()
     with self._mlmd_connection as m:
       [execution] = m.store.get_executions_by_id([execution_info.execution_id])
       self.assertProtoPartiallyEquals(
@@ -553,18 +516,18 @@ class LauncherTest(test_case_utils.TfxTest):
     # a new output.
     # In the second one, because the enable_cache is false and inputs don't
     # change. The launcher will published a new COMPLETE execution.
-    self.reloadPipelineWithNewRunId()
     self._trainer.execution_options.caching_options.enable_cache = False
 
     LauncherTest.fakeUpstreamOutputs(self._mlmd_connection, self._example_gen,
                                      self._transform)
-    execution_info = launcher.Launcher(
+    test_launcher = launcher.Launcher(
         pipeline_node=self._trainer,
         mlmd_connection=self._mlmd_connection,
         pipeline_info=self._pipeline_info,
         pipeline_runtime_spec=self._pipeline_runtime_spec,
         executor_spec=self._trainer_executor_spec,
-        custom_executor_operators=self._test_executor_operators).launch()
+        custom_executor_operators=self._test_executor_operators)
+    execution_info = test_launcher.launch()
 
     with self._mlmd_connection as m:
       [artifact] = m.store.get_artifacts_by_type('Model')
@@ -574,7 +537,7 @@ class LauncherTest(test_case_utils.TfxTest):
           custom_properties {
             key: "name"
             value {
-              string_value: ":test_run_%d:my_trainer:model:0"
+              string_value: ":test_run_0:my_trainer:model:0"
             }
           }
           custom_properties {
@@ -583,7 +546,7 @@ class LauncherTest(test_case_utils.TfxTest):
               string_value: "0.123.4.dev"
             }
           }
-          state: LIVE""" % self._pipeline_run_id_counter,
+          state: LIVE""",
           artifact,
           ignored_fields=[
               'type_id', 'uri', 'create_time_since_epoch',
@@ -601,16 +564,7 @@ class LauncherTest(test_case_utils.TfxTest):
               'last_update_time_since_epoch'
           ])
 
-    self.reloadPipelineWithNewRunId()
-    self._trainer.execution_options.caching_options.enable_cache = False
-    execution_info = launcher.Launcher(
-        pipeline_node=self._trainer,
-        mlmd_connection=self._mlmd_connection,
-        pipeline_info=self._pipeline_info,
-        pipeline_runtime_spec=self._pipeline_runtime_spec,
-        executor_spec=self._trainer_executor_spec,
-        custom_executor_operators=self._test_executor_operators).launch()
-
+    execution_info = test_launcher.launch()
     with self._mlmd_connection as m:
       artifacts = m.store.get_artifacts_by_type('Model')
       self.assertLen(artifacts, 2)
@@ -620,7 +574,7 @@ class LauncherTest(test_case_utils.TfxTest):
           custom_properties {
             key: "name"
             value {
-              string_value: ":test_run_%d:my_trainer:model:0"
+              string_value: ":test_run_0:my_trainer:model:0"
             }
           }
           custom_properties {
@@ -629,7 +583,7 @@ class LauncherTest(test_case_utils.TfxTest):
               string_value: "0.123.4.dev"
             }
           }
-          state: LIVE""" % self._pipeline_run_id_counter,
+          state: LIVE""",
           artifacts[1],
           ignored_fields=[
               'type_id', 'uri', 'create_time_since_epoch',
@@ -647,80 +601,10 @@ class LauncherTest(test_case_utils.TfxTest):
               'last_update_time_since_epoch'
           ])
 
-  def testLauncher_ReEntry(self):
-    # Some executors or runtime environment may reschedule the launcher job
-    # before the launcher job can publish any results of the execution to MLMD.
-    # The launcher should reuse the previous execution and proceed to a
-    # successful execution.
-    self.reloadPipelineWithNewRunId()
-    LauncherTest.fakeUpstreamOutputs(self._mlmd_connection, self._example_gen,
-                                     self._transform)
-    executor_operators = {
-        _PYTHON_CLASS_EXECUTABLE_SPEC: _FakeCrashingExecutorOperator
-    }
-    test_launcher = launcher.Launcher(
-        pipeline_node=self._trainer,
-        mlmd_connection=self._mlmd_connection,
-        pipeline_info=self._pipeline_info,
-        pipeline_runtime_spec=self._pipeline_runtime_spec,
-        executor_spec=self._trainer_executor_spec,
-        custom_executor_operators=executor_operators)
-
-    # The first launch simulates the launcher being restarted by preventing the
-    # publishing of any results to MLMD.
-    with contextlib.ExitStack() as stack:
-      stack.enter_context(
-          mock.patch.object(test_launcher, '_publish_failed_execution'))
-      stack.enter_context(
-          mock.patch.object(test_launcher,
-                            '_clean_up_stateless_execution_info'))
-      stack.enter_context(self.assertRaises(FakeError))
-      test_launcher.launch()
-
-    # Retrieve execution from the first launch, which should be in RUNNING
-    # state.
-    with self._mlmd_connection as m:
-      contexts = context_lib.prepare_contexts(
-          metadata_handler=m,
-          node_contexts=test_launcher._pipeline_node.contexts)
-      exec_properties = inputs_utils.resolve_parameters(
-          node_parameters=test_launcher._pipeline_node.parameters)
-      input_artifacts = inputs_utils.resolve_input_artifacts(
-          metadata_handler=m, node_inputs=test_launcher._pipeline_node.inputs)
-      first_execution = test_launcher._register_or_reuse_execution(
-          metadata_handler=m,
-          execution_type=self._trainer.node_info.type,
-          contexts=contexts,
-          input_artifacts=input_artifacts,
-          exec_properties=exec_properties)
-      self.assertEqual(first_execution.last_known_state,
-                       metadata_store_pb2.Execution.RUNNING)
-
-    # Create a second test launcher. It should reuse the previous execution.
-    executor_operators = {
-        _PYTHON_CLASS_EXECUTABLE_SPEC: _FakeExecutorOperator
-    }
-    second_test_launcher = launcher.Launcher(
-        pipeline_node=self._trainer,
-        mlmd_connection=self._mlmd_connection,
-        pipeline_info=self._pipeline_info,
-        pipeline_runtime_spec=self._pipeline_runtime_spec,
-        executor_spec=self._trainer_executor_spec,
-        custom_executor_operators=executor_operators)
-    execution_info = second_test_launcher.launch()
-
-    with self._mlmd_connection as m:
-      self.assertEqual(first_execution.id, execution_info.execution_id)
-      executions = m.store.get_executions_by_id([execution_info.execution_id])
-      self.assertLen(executions, 1)
-      self.assertEqual(executions.pop().last_known_state,
-                       metadata_store_pb2.Execution.COMPLETE)
-
   def testLauncher_ToleratesDoubleCleanup(self):
     # Some executors or runtime environment may delete stateful_working_dir,
     # tmp_dir and unexpectedly. The launcher should handle such cases gracefully
     # and proceed to a successful execution.
-    self.reloadPipelineWithNewRunId()
     LauncherTest.fakeUpstreamOutputs(self._mlmd_connection, self._example_gen,
                                      self._transform)
 
@@ -744,7 +628,7 @@ class LauncherTest(test_case_utils.TfxTest):
           custom_properties {
             key: "name"
             value {
-              string_value: ":test_run_%d:my_trainer:model:0"
+              string_value: ":test_run_0:my_trainer:model:0"
             }
           }
           custom_properties {
@@ -753,7 +637,7 @@ class LauncherTest(test_case_utils.TfxTest):
               string_value: "0.123.4.dev"
             }
           }
-          state: LIVE""" % self._pipeline_run_id_counter,
+          state: LIVE""",
           artifact,
           ignored_fields=[
               'type_id', 'uri', 'create_time_since_epoch',
@@ -774,7 +658,6 @@ class LauncherTest(test_case_utils.TfxTest):
   def testLauncher_ExecutionFailed(self):
     # In the case that the executor failed and raises an execption.
     # An Execution will be published.
-    self.reloadPipelineWithNewRunId()
     LauncherTest.fakeUpstreamOutputs(self._mlmd_connection, self._example_gen,
                                      self._transform)
     executor_operators = {
@@ -793,7 +676,6 @@ class LauncherTest(test_case_utils.TfxTest):
   def testLauncher_ExecutionFailedViaReturnCode(self):
     # In the case that the executor failed and raises an execption.
     # An Execution will be published.
-    self.reloadPipelineWithNewRunId()
     LauncherTest.fakeUpstreamOutputs(self._mlmd_connection, self._example_gen,
                                      self._transform)
     executor_operators = {
@@ -834,7 +716,6 @@ class LauncherTest(test_case_utils.TfxTest):
           ])
 
   def testLauncher_with_CustomDriver_NewSpan(self):
-    self.reloadPipelineWithNewRunId()
     test_launcher = launcher.Launcher(
         pipeline_node=self._example_gen,
         mlmd_connection=self._mlmd_connection,
@@ -853,7 +734,7 @@ class LauncherTest(test_case_utils.TfxTest):
           custom_properties {
             key: "name"
             value {
-              string_value: ":test_run_%d:my_example_gen:output_examples:0"
+              string_value: ":test_run_0:my_example_gen:output_examples:0"
             }
           }
           custom_properties {
@@ -874,7 +755,7 @@ class LauncherTest(test_case_utils.TfxTest):
               string_value: "0.123.4.dev"
             }
           }
-          state: LIVE""" % self._pipeline_run_id_counter,
+          state: LIVE""",
           artifact,
           ignored_fields=[
               'type_id', 'uri', 'create_time_since_epoch',
@@ -884,7 +765,7 @@ class LauncherTest(test_case_utils.TfxTest):
   def testLauncher_with_CustomDriver_ExistingSpan(self):
     LauncherTest.fakeExampleGenOutput(self._mlmd_connection, self._example_gen,
                                       2, 1)
-    self.reloadPipelineWithNewRunId()
+
     test_launcher = launcher.Launcher(
         pipeline_node=self._example_gen,
         mlmd_connection=self._mlmd_connection,
@@ -907,7 +788,7 @@ class LauncherTest(test_case_utils.TfxTest):
           custom_properties {
             key: "name"
             value {
-              string_value: ":test_run_%d:my_example_gen:output_examples:0"
+              string_value: ":test_run_0:my_example_gen:output_examples:0"
             }
           }
           custom_properties {
@@ -928,7 +809,7 @@ class LauncherTest(test_case_utils.TfxTest):
               string_value: "0.123.4.dev"
             }
           }
-          state: LIVE""" % self._pipeline_run_id_counter,
+          state: LIVE""",
           artifact,
           ignored_fields=[
               'type_id', 'uri', 'create_time_since_epoch',
