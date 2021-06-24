@@ -125,8 +125,7 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
         examplegen_input_config=None,
         examplegen_range_config=None,
         resolver_range_config=None,
-        beam_pipeline_args=self._make_beam_pipeline_args(),
-        enable_transform_input_cache=False)
+        beam_pipeline_args=self._make_beam_pipeline_args())
 
     logging.info('Starting the first pipeline run.')
     LocalDagRunner().run(pipeline)
@@ -180,8 +179,7 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
             examplegen_input_config=None,
             examplegen_range_config=None,
             resolver_range_config=None,
-            beam_pipeline_args=self._make_beam_pipeline_args(),
-            enable_transform_input_cache=False))
+            beam_pipeline_args=self._make_beam_pipeline_args()))
 
     self.assertTrue(fileio.exists(self._serving_model_dir))
     self.assertTrue(fileio.exists(self._metadata_path))
@@ -214,8 +212,7 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
             examplegen_input_config=None,
             examplegen_range_config=None,
             resolver_range_config=None,
-            beam_pipeline_args=[],
-            enable_transform_input_cache=False))
+            beam_pipeline_args=[]))
 
     self.assertTrue(fileio.exists(self._serving_model_dir))
     self.assertTrue(fileio.exists(self._metadata_path))
@@ -248,8 +245,7 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
             examplegen_input_config=None,
             examplegen_range_config=None,
             resolver_range_config=None,
-            beam_pipeline_args=[],
-            enable_transform_input_cache=False))
+            beam_pipeline_args=[]))
 
     self.assertTrue(fileio.exists(self._serving_model_dir))
     self.assertTrue(fileio.exists(self._metadata_path))
@@ -306,8 +302,7 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
               examplegen_input_config=examplegen_input_config,
               examplegen_range_config=examplegen_range_config,
               resolver_range_config=resolver_range_config,
-              beam_pipeline_args=self._make_beam_pipeline_args(),
-              enable_transform_input_cache=True))
+              beam_pipeline_args=self._make_beam_pipeline_args()))
 
     # Trigger the pipeline for the first span.
     examplegen_range_config = proto.RangeConfig(
@@ -320,7 +315,7 @@ class PenguinPipelineLocalEndToEndTest(tf.test.TestCase,
     self._assertPipelineExecution()
     transform_execution_type = 'tfx.components.transform.component.Transform'
     trainer_execution_type = 'tfx.components.trainer.component.Trainer'
-    expected_execution_count = 11  # 8 components + 3 resolvers
+    expected_execution_count = 10  # 8 components + 2 resolver
     metadata_config = metadata.sqlite_metadata_connection_config(
         self._metadata_path)
     store = mlmd.MetadataStore(metadata_config)
